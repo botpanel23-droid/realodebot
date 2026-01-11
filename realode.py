@@ -1,136 +1,145 @@
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler, Filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
 
-# Replace with your bot API key
 API_KEY = "8509386079:AAGo1ZZki1t1pJRW3xzZllrIXrPvpjxXueY"
 
-# Placeholder: Replace with actual details
 CHANNELS = [
-    "https://t.me/Movie_Zone_Vip", 
-    "https://t.me/Reading_Book_Movie_Zone", 
-    "https://t.me/quotes_Srilanka", 
-    "https://t.me/+JWscqPT8saEwZThl", 
-    "https://t.me/+66O0nXcSlTNjZTk9", 
-    "https://t.me/+RZzIcgCPk8ZjY2Zl"
+    "@Movie_Zone_Vip",
+    "@Reading_Book_Movie_Zone",
+    "https://t.me/+JWscqPT8saEwZThl"
 ]
 
-OWNER_ID = 8452357204 # Your owner telegram user ID
-ADMIN_GROUP_ID = -5139705408  # Admin group ID
+OWNER_ID = 8452357204
+ADMIN_GROUP_ID = -5139705408
 
 user_balance = {}
-user_referrals = {}
+withdraw_states = {}
 
-def is_user_joined(user_id):
+# ---------- UTIL ----------
+async def is_user_joined(bot, user_id):
     for channel in CHANNELS:
         try:
-            # Check if the user is a member of each channel
-            member = bot.get_chat_member(channel, user_id)
-            if member.status == "left":
+            member = await bot.get_chat_member(channel, user_id)
+            if member.status in ["left", "kicked"]:
                 return False
-        except Exception as e:
+        except:
             return False
     return True
 
-def start(update: Update, context: CallbackContext) -> None:
-    user_id = update.message.from_user.id
-    user_name = update.message.from_user.first_name
-    user_balance[user_id] = 0  # Initialize user balance
+# ---------- COMMANDS ----------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_name = update.effective_user.first_name
 
-    # Send start message with channel join link and "try again" button
-    if not is_user_joined(user_id):
-        update.message.reply_text(
-            "Please join all the following channels before using the bot:\n" + 
-            "\n".join(CHANNELS) + "\nThen try again."
+    user_balance.setdefault(user_id, 0)
+
+    joined = await is_user_joined(context.bot, user_id)
+    if not joined:
+        await update.message.reply_text(
+            "❌ Please join all channels first:\n\n" +
+            "\n".join(CHANNELS) +
+            "\n\nThen send /start again"
         )
-    else:
-        # Show buttons for Balance, Referral, and Withdrawal
-        keyboard = [
-            ['Balance', 'Referral'],
-            ['Withdrawal']
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-        update.message.reply_text(f"Welcome {user_name}!", reply_markup=reply_markup)
-
-def balance(update: Update, context: CallbackContext) -> None:
-    user_id = update.message.from_user.id
-    balance = user_balance.get(user_id, 0)
-    update.message.reply_text(f"Your balance is: Rs {balance}")
-
-def referral(update: Update, context: CallbackContext) -> None:
-    user_id = update.message.from_user.id
-    referral_link = f"t.me/yourbot?start={user_id}"
-    user_referrals[user_id] = user_referrals.get(user_id, 0) + 1
-    update.message.reply_text(f"Your referral link: {referral_link}")
-
-def withdrawal(update: Update, context: CallbackContext) -> None:
-    user_id = update.message.from_user.id
-    if user_balance.get(user_id, 0) < 50:
-        update.message.reply_text("Minimum withdrawal is Rs 50.")
         return
 
-    update.message.reply_text("Please provide your name.")
-    return "WAITING_FOR_NAME"
-
-def handle_withdrawal_name(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    user_name = update.message.text
-    update.message.reply_text("Please provide the amount you'd like to withdraw (minimum Rs 50).")
-    return "WAITING_FOR_AMOUNT"
-
-def handle_withdrawal_amount(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    amount = int(update.message.text)
-    if amount < 50:
-        update.message.reply_text("Minimum withdrawal amount is Rs 50.")
-        return
-    # Ask for Reload number
-    update.message.reply_text("Please provide your Reload number.")
-    return "WAITING_FOR_RELOAD"
-
-def handle_reload_number(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    reload_number = update.message.text
-    update.message.reply_text(f"Your request is being processed. Reload will arrive within 24 hours.")
-    
-    # Send the request to admin group
-    context.bot.send_message(
-        ADMIN_GROUP_ID,
-        f"User {user_id} requested withdrawal. Details:\nName: {user_name}\nAmount: Rs {amount}\nReload Number: {reload_number}"
+    keyboard = [["Balance", "Referral"], ["Withdrawal"]]
+    await update.message.reply_text(
+        f"Welcome {user_name} 👋",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
-    return "PROCESSING"
+async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bal = user_balance.get(update.effective_user.id, 0)
+    await update.message.reply_text(f"💰 Your balance: Rs {bal}")
 
-def owner_send(update: Update, context: CallbackContext):
-    if update.message.from_user.id == OWNER_ID:
-        user_id = int(context.args[0])
-        amount = int(context.args[1])
-        user_balance[user_id] += amount
-        context.bot.send_message(user_id, f"Your balance has been credited with Rs {amount}.")
+async def referral(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    link = f"https://t.me/yourbot?start={uid}"
+    await update.message.reply_text(f"🔗 Your referral link:\n{link}")
 
-def users(update: Update, context: CallbackContext):
-    if update.message.from_user.id == OWNER_ID:
-        all_users = '\n'.join([str(user) for user in user_balance.keys()])
-        update.message.reply_text(f"All Users: {all_users}")
+async def withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if user_balance.get(uid, 0) < 50:
+        await update.message.reply_text("❌ Minimum withdrawal is Rs 50")
+        return
 
+    withdraw_states[uid] = {"step": "name"}
+    await update.message.reply_text("Enter your name:")
+
+async def owner_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+
+    uid = int(context.args[0])
+    amount = int(context.args[1])
+    user_balance[uid] = user_balance.get(uid, 0) + amount
+    await context.bot.send_message(uid, f"✅ Credited Rs {amount}")
+
+async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id == OWNER_ID:
+        await update.message.reply_text(
+            "👥 Users:\n" + "\n".join(map(str, user_balance.keys()))
+        )
+
+# ---------- MESSAGE HANDLER ----------
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    text = update.message.text
+
+    if uid not in withdraw_states:
+        return
+
+    state = withdraw_states[uid]
+
+    if state["step"] == "name":
+        state["name"] = text
+        state["step"] = "amount"
+        await update.message.reply_text("Enter withdrawal amount:")
+
+    elif state["step"] == "amount":
+        amount = int(text)
+        if amount < 50:
+            await update.message.reply_text("❌ Minimum Rs 50")
+            return
+        state["amount"] = amount
+        state["step"] = "reload"
+        await update.message.reply_text("Enter reload number:")
+
+    elif state["step"] == "reload":
+        state["reload"] = text
+
+        await context.bot.send_message(
+            ADMIN_GROUP_ID,
+            f"💸 Withdrawal Request\n"
+            f"User: {uid}\n"
+            f"Name: {state['name']}\n"
+            f"Amount: Rs {state['amount']}\n"
+            f"Reload: {state['reload']}"
+        )
+
+        await update.message.reply_text("✅ Request sent. Reload within 24 hours.")
+        withdraw_states.pop(uid)
+
+# ---------- MAIN ----------
 def main():
-    updater = Updater(API_KEY)
-    dispatcher = updater.dispatcher
+    app = ApplicationBuilder().token(API_KEY).build()
 
-    # Commands
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("balance", balance))
-    dispatcher.add_handler(CommandHandler("referral", referral))
-    dispatcher.add_handler(CommandHandler("withdrawal", withdrawal))
-    dispatcher.add_handler(CommandHandler("send", owner_send, pass_args=True))
-    dispatcher.add_handler(CommandHandler("users", users))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("balance", balance))
+    app.add_handler(CommandHandler("referral", referral))
+    app.add_handler(CommandHandler("withdrawal", withdrawal))
+    app.add_handler(CommandHandler("send", owner_send))
+    app.add_handler(CommandHandler("users", users))
 
-    # Message Handlers
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_withdrawal_name))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_withdrawal_amount))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_reload_number))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    updater.start_polling()
-    updater.idle()
+    app.run_polling()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
