@@ -1,4 +1,10 @@
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputFile
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -9,85 +15,77 @@ from telegram.ext import (
 
 API_KEY = "8509386079:AAGo1ZZki1t1pJRW3xzZllrIXrPvpjxXueY"
 
-CHANNELS = [
-    "@Movie_Zone_Vip",
-    "@Reading_Book_Movie_Zone",
-    "https://t.me/+JWscqPT8saEwZThl"
-]
+CHANNELS = {
+    "Movie Zone VIP": "https://t.me/Movie_Zone_Vip",
+    "Reading Book": "https://t.me/Reading_Book_Movie_Zone",
+    "Fine X Hub": "https://t.me/+JWscqPT8saEwZThl"
+}
 
 OWNER_ID = 8452357204
 ADMIN_GROUP_ID = -5139705408
 
+MIN_WITHDRAW = 50
+REF_BONUS = 4
+
 user_balance = {}
 withdraw_states = {}
 
-# ---------- UTIL ----------
-async def is_user_joined(bot, user_id):
-    for channel in CHANNELS:
-        try:
-            member = await bot.get_chat_member(channel, user_id)
-            if member.status in ["left", "kicked"]:
-                return False
-        except:
-            return False
-    return True
-
-# ---------- COMMANDS ----------
+# ---------- START ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_name = update.effective_user.first_name
+    keyboard = [
+        [InlineKeyboardButton(name, url=url)]
+        for name, url in CHANNELS.items()
+    ]
+    keyboard.append([InlineKeyboardButton("🔁 Try Again", callback_data="try")])
 
-    user_balance.setdefault(user_id, 0)
+    await update.message.reply_text(
+        "🔔 Please join these channels 👇\n(Join or not – you can still try)",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-    joined = await is_user_joined(context.bot, user_id)
-    if not joined:
-        await update.message.reply_text(
-            "❌ Please join all channels first:\n\n" +
-            "\n".join(CHANNELS) +
-            "\n\nThen send /start again"
-        )
-        return
+# ---------- TRY AGAIN ----------
+async def try_again(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    uid = query.from_user.id
+    user_balance.setdefault(uid, 0)
 
     keyboard = [["Balance", "Referral"], ["Withdrawal"]]
-    await update.message.reply_text(
-        f"Welcome {user_name} 👋",
+
+    await query.message.reply_photo(
+        photo="https://files.catbox.moe/ii1zn5.jpg",
+        caption="✅ Bot Menu",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
+# ---------- BALANCE ----------
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bal = user_balance.get(update.effective_user.id, 0)
-    await update.message.reply_text(f"💰 Your balance: Rs {bal}")
+    await update.message.reply_text(f"💰 Balance: Rs {bal}")
 
+# ---------- REFERRAL ----------
 async def referral(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     link = f"https://t.me/yourbot?start={uid}"
-    await update.message.reply_text(f"🔗 Your referral link:\n{link}")
+    await update.message.reply_text(
+        f"🔗 Your Referral Link:\n{link}\n\n"
+        f"🎁 Bonus per referral: Rs {REF_BONUS}"
+    )
 
+# ---------- WITHDRAW ----------
 async def withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    if user_balance.get(uid, 0) < 50:
-        await update.message.reply_text("❌ Minimum withdrawal is Rs 50")
-        return
-
-    withdraw_states[uid] = {"step": "name"}
-    await update.message.reply_text("Enter your name:")
-
-async def owner_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        return
-
-    uid = int(context.args[0])
-    amount = int(context.args[1])
-    user_balance[uid] = user_balance.get(uid, 0) + amount
-    await context.bot.send_message(uid, f"✅ Credited Rs {amount}")
-
-async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id == OWNER_ID:
+    if user_balance.get(uid, 0) < MIN_WITHDRAW:
         await update.message.reply_text(
-            "👥 Users:\n" + "\n".join(map(str, user_balance.keys()))
+            f"❌ Minimum withdrawal is Rs {MIN_WITHDRAW}"
         )
+        return
 
-# ---------- MESSAGE HANDLER ----------
+    withdraw_states[uid] = {"step": "amount"}
+    await update.message.reply_text("💸 Enter withdrawal amount:")
+
+# ---------- TEXT HANDLER ----------
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
@@ -97,34 +95,57 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state = withdraw_states[uid]
 
-    if state["step"] == "name":
-        state["name"] = text
-        state["step"] = "amount"
-        await update.message.reply_text("Enter withdrawal amount:")
-
-    elif state["step"] == "amount":
+    if state["step"] == "amount":
         amount = int(text)
-        if amount < 50:
+        if amount < MIN_WITHDRAW:
             await update.message.reply_text("❌ Minimum Rs 50")
             return
-        state["amount"] = amount
-        state["step"] = "reload"
-        await update.message.reply_text("Enter reload number:")
 
-    elif state["step"] == "reload":
-        state["reload"] = text
+        state["amount"] = amount
+        state["step"] = "mobile"
+        await update.message.reply_text("📱 Enter mobile number:")
+
+    elif state["step"] == "mobile":
+        state["mobile"] = text
+        name = update.effective_user.first_name
 
         await context.bot.send_message(
             ADMIN_GROUP_ID,
-            f"💸 Withdrawal Request\n"
-            f"User: {uid}\n"
-            f"Name: {state['name']}\n"
-            f"Amount: Rs {state['amount']}\n"
-            f"Reload: {state['reload']}"
+            f"💸 Withdrawal Request\n\n"
+            f"👤 Name: {name}\n"
+            f"🆔 ID: {uid}\n"
+            f"💰 Amount: Rs {state['amount']}\n"
+            f"📱 Mobile: {state['mobile']}"
         )
 
-        await update.message.reply_text("✅ Request sent. Reload within 24 hours.")
+        await update.message.reply_text(
+            "✅ Request sent.\nReload will be credited within 24 hours."
+        )
         withdraw_states.pop(uid)
+
+# ---------- OWNER SEND ----------
+async def owner_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+
+    uid = int(context.args[0])
+    amount = int(context.args[1])
+
+    user_balance[uid] = user_balance.get(uid, 0) + amount
+
+    await context.bot.send_message(
+        uid,
+        f"✅ Rs {amount} credited.\nYour reload will arrive within 24 hours."
+    )
+
+    await update.message.reply_text("✔ Balance updated")
+
+# ---------- USERS ----------
+async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id == OWNER_ID:
+        await update.message.reply_text(
+            "👥 Users:\n" + "\n".join(map(str, user_balance.keys()))
+        )
 
 # ---------- MAIN ----------
 def main():
@@ -138,6 +159,7 @@ def main():
     app.add_handler(CommandHandler("users", users))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_handler(filters.CallbackQueryHandler(try_again, pattern="try"))
 
     app.run_polling()
 
